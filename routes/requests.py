@@ -46,11 +46,16 @@ def create_request():
         return jsonify({"error": e.message}), e.status
 
 
-@requests_bp.route("/<request_id>", methods=["PUT"])
+@requests_bp.route("/<request_id>", methods=["PUT", "PATCH"])
 @require_auth
 @require_roles("TENANT", "MANAGER", "BUILDING_COMPANY")
 def update_request(request_id):
-    """Update an existing request. The id comes only from the URL."""
+    """Update an existing request (full PUT or partial PATCH).
+
+    The id comes only from the URL. A MANAGER uses this to change the request
+    status (e.g. {"status": "approved"}); the service strips protected fields
+    (request_id, tenant_id) and persists the rest, returning the updated row.
+    """
     data = request.get_json(silent=True)
     try:
         return jsonify(
