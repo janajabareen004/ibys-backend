@@ -56,6 +56,12 @@ class ProgressService:
         if date_error:
             raise ServiceError(date_error, 400)
 
+        percent_error = Progress.validate_progress_percent(data.get("progress_percent"))
+        if percent_error:
+            raise ServiceError(percent_error, 400)
+        if data.get("progress_percent") is not None:
+            data["progress_percent"] = int(data["progress_percent"])
+
         # project_id must come only from the URL, never the body.
         Progress.strip_protected(data)
         data["project_id"] = project_id
@@ -76,6 +82,13 @@ class ProgressService:
 
         if not data:
             raise ServiceError("No updatable fields provided.", 400)
+
+        if "progress_percent" in data:
+            percent_error = Progress.validate_progress_percent(data.get("progress_percent"))
+            if percent_error:
+                raise ServiceError(percent_error, 400)
+            if data.get("progress_percent") is not None:
+                data["progress_percent"] = int(data["progress_percent"])
 
         new_start = data.get("start_date")
         new_end = data.get("end_date")

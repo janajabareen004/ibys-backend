@@ -18,6 +18,7 @@ class Progress:
         end_date=None,
         status=None,
         project_id=None,
+        progress_percent=None,
     ):
         self.progress_id = progress_id
         self.task_name = task_name
@@ -25,6 +26,8 @@ class Progress:
         self.end_date = end_date
         self.status = status
         self.project_id = project_id
+        # Nullable 0-100 completion percentage. Null for legacy rows.
+        self.progress_percent = progress_percent
 
     @classmethod
     def from_dict(cls, data):
@@ -37,6 +40,7 @@ class Progress:
             end_date=data.get("end_date"),
             status=data.get("status"),
             project_id=data.get("project_id"),
+            progress_percent=data.get("progress_percent"),
         )
 
     def to_dict(self):
@@ -48,6 +52,7 @@ class Progress:
             "end_date": self.end_date,
             "status": self.status,
             "project_id": self.project_id,
+            "progress_percent": self.progress_percent,
         }
 
     @staticmethod
@@ -69,6 +74,25 @@ class Progress:
             return error
         if start > end:
             return "start_date cannot be later than end_date."
+        return None
+
+    @staticmethod
+    def validate_progress_percent(value):
+        """Validate an optional progress_percent (integer 0-100).
+
+        Returns an error message, or None when the value is absent/None or valid.
+        Accepts int or numeric strings; rejects out-of-range or non-numeric input.
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return "progress_percent must be an integer between 0 and 100."
+        try:
+            number = int(value)
+        except (ValueError, TypeError):
+            return "progress_percent must be an integer between 0 and 100."
+        if number < 0 or number > 100:
+            return "progress_percent must be between 0 and 100."
         return None
 
     @classmethod
