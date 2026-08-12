@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, g
 from services.request_service import RequestService
+from services.activity_service import ActivityService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -7,6 +8,7 @@ from services.auth_guard import require_auth, require_roles
 requests_bp = Blueprint("requests", __name__, url_prefix="/api/requests")
 
 request_service = RequestService()
+activity_service = ActivityService()
 
 
 @requests_bp.route("", methods=["GET"])
@@ -41,9 +43,14 @@ def create_request():
     """Create a new request."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(request_service.create(g.current_user_id, data)), 201
+        created = request_service.create(g.current_user_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    # Requests have no project_id column; resolve it via the tenant's apartment.
+    project_id = activity_service.resolve_request_project_id(created.get("tenant_id"))
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    activity_service.record_event(project_id, actor, "request_received", "submitted a new request")
+    return jsonify(created), 201
 
 
 @requests_bp.route("/<request_id>", methods=["PUT", "PATCH"])
@@ -58,11 +65,21 @@ def update_request(request_id):
     """
     data = request.get_json(silent=True)
     try:
-        return jsonify(
-            request_service.update(request_id, data, g.current_user_id, g.current_role)
-        ), 200
+        updated = request_service.update(request_id, data, g.current_user_id, g.current_role)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    # Requests have no project_id column; resolve it via the tenant's apartment.
+    project_id = activity_service.resolve_request_project_id(updated.get("tenant_id"))
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    body = data or {}
+    status = str(body.get("status", "")).strip().lower()
+    if status == "approved":
+        activity_service.record_event(project_id, actor, "request_approved", "approved a tenant request")
+    elif status == "rejected":
+        activity_service.record_event(project_id, actor, "request_rejected", "rejected a tenant request")
+    if body.get("reply"):
+        activity_service.record_event(project_id, actor, "request_replied", "replied to a tenant request")
+    return jsonify(updated), 200
 
 
 @requests_bp.route("/<request_id>", methods=["DELETE"])

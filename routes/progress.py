@@ -1,5 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.progress_service import ProgressService
+from services.activity_service import ActivityService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -8,6 +9,7 @@ from services.auth_guard import require_auth, require_roles
 progress_bp = Blueprint("progress", __name__)
 
 progress_service = ProgressService()
+activity_service = ActivityService()
 
 
 @progress_bp.route("/api/progress", methods=["GET"])
@@ -56,9 +58,15 @@ def update_progress(progress_id):
     """Update a progress record. The id comes only from the URL."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(progress_service.update(progress_id, data)), 200
+        updated = progress_service.update(progress_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    stage_name = updated.get("task_name") or "a stage"
+    status = updated.get("status")
+    message = f"updated {stage_name}" + (f" to {status}" if status else "")
+    activity_service.record_event(updated.get("project_id"), actor, "stage_updated", message)
+    return jsonify(updated), 200
 
 
 @progress_bp.route("/api/progress/<progress_id>", methods=["DELETE"])

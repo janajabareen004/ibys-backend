@@ -1,5 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.image_service import ImageService
+from services.activity_service import ActivityService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -8,6 +9,7 @@ from services.auth_guard import require_auth, require_roles
 images_bp = Blueprint("images", __name__)
 
 image_service = ImageService()
+activity_service = ActivityService()
 
 
 @images_bp.route("/api/images", methods=["GET"])
@@ -44,9 +46,13 @@ def create_image(project_id):
     """Create an image under a project. project_id comes only from the URL."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(image_service.create(project_id, data)), 201
+        created = image_service.create(project_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    label = created.get("title") or created.get("description") or "a photo"
+    activity_service.record_event(project_id, actor, "photo_uploaded", f"uploaded {label}")
+    return jsonify(created), 201
 
 
 @images_bp.route("/api/images/<image_id>", methods=["PUT"])

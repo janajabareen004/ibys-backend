@@ -1,5 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.team_service import TeamService
+from services.activity_service import ActivityService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -8,6 +9,7 @@ from services.auth_guard import require_auth, require_roles
 team_bp = Blueprint("team", __name__)
 
 team_service = TeamService()
+activity_service = ActivityService()
 
 
 @team_bp.route("/api/team", methods=["GET"])
@@ -47,9 +49,16 @@ def create_team_member(project_id):
     """Create a team member under a project. project_id comes only from the URL."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(team_service.create(project_id, data)), 201
+        created = team_service.create(project_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    # No dedicated "member added" type in the frontend enum; use note_added.
+    activity_service.record_event(
+        project_id, actor, "note_added",
+        f"added team member {created.get('name', '')}".strip(),
+    )
+    return jsonify(created), 201
 
 
 @team_bp.route("/api/team/<member_id>", methods=["PUT", "PATCH"])

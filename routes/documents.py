@@ -1,5 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.document_service import DocumentService
+from services.activity_service import ActivityService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -8,6 +9,7 @@ from services.auth_guard import require_auth, require_roles
 documents_bp = Blueprint("documents", __name__)
 
 document_service = DocumentService()
+activity_service = ActivityService()
 
 
 @documents_bp.route("/api/documents", methods=["GET"])
@@ -44,9 +46,13 @@ def create_document(project_id):
     """Create a document under a project. project_id comes only from the URL."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(document_service.create(project_id, data)), 201
+        created = document_service.create(project_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    label = created.get("file_name") or "a document"
+    activity_service.record_event(project_id, actor, "document_added", f"added {label}")
+    return jsonify(created), 201
 
 
 @documents_bp.route("/api/documents/<document_id>", methods=["PUT"])

@@ -1,5 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.meeting_service import MeetingService
+from services.activity_service import ActivityService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -8,6 +9,7 @@ from services.auth_guard import require_auth, require_roles
 meetings_bp = Blueprint("meetings", __name__)
 
 meeting_service = MeetingService()
+activity_service = ActivityService()
 
 
 @meetings_bp.route("/api/meetings", methods=["GET"])
@@ -44,9 +46,13 @@ def create_meeting(project_id):
     """Create a meeting under a project. project_id comes only from the URL."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(meeting_service.create(project_id, data)), 201
+        created = meeting_service.create(project_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    label = created.get("title") or "a meeting"
+    activity_service.record_event(project_id, actor, "meeting_scheduled", f"scheduled {label}")
+    return jsonify(created), 201
 
 
 @meetings_bp.route("/api/meetings/<meeting_id>", methods=["PUT"])
@@ -56,9 +62,13 @@ def update_meeting(meeting_id):
     """Update a meeting (including approve/reject via status). The id comes only from the URL."""
     data = request.get_json(silent=True)
     try:
-        return jsonify(meeting_service.update(meeting_id, data)), 200
+        updated = meeting_service.update(meeting_id, data)
     except ServiceError as e:
         return jsonify({"error": e.message}), e.status
+    actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
+    label = updated.get("title") or "a meeting"
+    activity_service.record_event(updated.get("project_id"), actor, "meeting_updated", f"updated {label}")
+    return jsonify(updated), 200
 
 
 @meetings_bp.route("/api/meetings/<meeting_id>", methods=["DELETE"])
