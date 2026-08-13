@@ -12,6 +12,7 @@ from routes.meetings import meetings_bp
 from routes.apartments import apartments_bp
 from routes.ai_chats import ai_chats_bp
 from routes.notifications import notifications_bp
+from routes.manager_notifications import manager_notifications_bp
 from routes.tenants import tenants_bp
 from routes.tasks import tasks_bp
 from routes.team import team_bp
@@ -46,6 +47,7 @@ app.register_blueprint(meetings_bp)
 app.register_blueprint(apartments_bp)
 app.register_blueprint(ai_chats_bp)
 app.register_blueprint(notifications_bp)
+app.register_blueprint(manager_notifications_bp)
 app.register_blueprint(tenants_bp)
 app.register_blueprint(tasks_bp)
 app.register_blueprint(team_bp)

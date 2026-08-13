@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from services.request_service import RequestService
 from services.activity_service import ActivityService
+from services.manager_notification_service import ManagerNotificationService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -9,6 +10,7 @@ requests_bp = Blueprint("requests", __name__, url_prefix="/api/requests")
 
 request_service = RequestService()
 activity_service = ActivityService()
+manager_notification_service = ManagerNotificationService()
 
 
 @requests_bp.route("", methods=["GET"])
@@ -50,6 +52,18 @@ def create_request():
     project_id = activity_service.resolve_request_project_id(created.get("tenant_id"))
     actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
     activity_service.record_event(project_id, actor, "request_received", "submitted a new request")
+
+    # Notify the manager who owns this request's project (best-effort; never
+    # fabricates a recipient and never fails the request creation above).
+    manager_id = manager_notification_service.resolve_project_manager_id(project_id)
+    if manager_id:
+        description = (created.get("description") or "").strip()
+        snippet = (description[:120] + "\u2026") if len(description) > 120 else description
+        message = f"New request: {snippet}" if snippet else "A tenant submitted a new request."
+        manager_notification_service.record(
+            manager_id, project_id, "request", "New tenant request", message
+        )
+
     return jsonify(created), 201
 
 
