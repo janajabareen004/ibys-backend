@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, g
 from services.request_service import RequestService
 from services.activity_service import ActivityService
 from services.manager_notification_service import ManagerNotificationService
+from services.notification_service import NotificationService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -11,6 +12,7 @@ requests_bp = Blueprint("requests", __name__, url_prefix="/api/requests")
 request_service = RequestService()
 activity_service = ActivityService()
 manager_notification_service = ManagerNotificationService()
+notification_service = NotificationService()
 
 
 @requests_bp.route("", methods=["GET"])
@@ -78,6 +80,14 @@ def update_request(request_id):
     (request_id, tenant_id) and persists the rest, returning the updated row.
     """
     data = request.get_json(silent=True)
+    # Capture the previous status BEFORE the update so we only notify the tenant
+    # on a real status transition (prevents duplicate notifications on repeated
+    # no-op saves). Best-effort: the authoritative 404 still comes from update().
+    prev_status = ""
+    try:
+        prev_status = str((request_service.get_by_id(request_id) or {}).get("status", "")).strip().lower()
+    except ServiceError:
+        prev_status = ""
     try:
         updated = request_service.update(request_id, data, g.current_user_id, g.current_role)
     except ServiceError as e:
@@ -93,6 +103,22 @@ def update_request(request_id):
         activity_service.record_event(project_id, actor, "request_rejected", "rejected a tenant request")
     if body.get("reply"):
         activity_service.record_event(project_id, actor, "request_replied", "replied to a tenant request")
+
+    # Notify the request's OWNER (tenant) when the manager transitions the status
+    # to a decision. Gated on a real change (status != prev_status) so repeated
+    # or no-op saves never duplicate. Best-effort; never fails the update above.
+    if status in ("approved", "rejected") and status != prev_status:
+        tenant_id = updated.get("tenant_id")
+        description = (updated.get("description") or "").strip()
+        snippet = (description[:120] + "\u2026") if len(description) > 120 else description
+        if status == "approved":
+            title = "Request approved"
+            message = f"Your request was approved: {snippet}" if snippet else "Your request was approved."
+        else:
+            title = "Request rejected"
+            message = f"Your request was rejected: {snippet}" if snippet else "Your request was rejected."
+        notification_service.create_for_tenant(tenant_id, "system", title, message)
+
     return jsonify(updated), 200
 
 
