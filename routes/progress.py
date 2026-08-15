@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, g
 from services.progress_service import ProgressService
 from services.activity_service import ActivityService
 from services.manager_notification_service import ManagerNotificationService
+from services.project_service import ProjectService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -12,6 +13,7 @@ progress_bp = Blueprint("progress", __name__)
 progress_service = ProgressService()
 activity_service = ActivityService()
 manager_notification_service = ManagerNotificationService()
+project_service = ProjectService()
 
 
 @progress_bp.route("/api/progress", methods=["GET"])
@@ -57,7 +59,23 @@ def create_progress(project_id):
 @require_auth
 @require_roles("MANAGER", "BUILDING_COMPANY")
 def update_progress(progress_id):
-    """Update a progress record. The id comes only from the URL."""
+    """Update a progress record. The id comes only from the URL.
+
+    A BUILDING_COMPANY caller may only update a progress record belonging to
+    a project it owns (project.building_company_id must match the
+    authenticated user); this is checked here since the progress_id alone
+    cannot be trusted. MANAGER behavior is unchanged — no ownership check is
+    performed for that role.
+    """
+    if g.current_role == "BUILDING_COMPANY":
+        try:
+            existing = progress_service.get_by_id(progress_id)
+            project = project_service.get_by_id(existing.get("project_id"))
+        except ServiceError as e:
+            return jsonify({"error": e.message}), e.status
+        if str(project.get("building_company_id")) != str(g.current_user_id):
+            return jsonify({"error": "Forbidden: you do not own this project."}), 403
+
     data = request.get_json(silent=True)
     try:
         updated = progress_service.update(progress_id, data)
