@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from services.progress_service import ProgressService
 from services.activity_service import ActivityService
+from services.manager_notification_service import ManagerNotificationService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -10,6 +11,7 @@ progress_bp = Blueprint("progress", __name__)
 
 progress_service = ProgressService()
 activity_service = ActivityService()
+manager_notification_service = ManagerNotificationService()
 
 
 @progress_bp.route("/api/progress", methods=["GET"])
@@ -66,6 +68,25 @@ def update_progress(progress_id):
     status = updated.get("status")
     message = f"updated {stage_name}" + (f" to {status}" if status else "")
     activity_service.record_event(updated.get("project_id"), actor, "stage_updated", message)
+
+    # Notify the project's Building Company when a MANAGER updates progress.
+    # Best-effort (record() never raises) so a notification failure can never
+    # undo the already-successful progress update above. The recipient is
+    # resolved server-side from the project's own building_company_id — never
+    # trusted from the request. A BUILDING_COMPANY updating its own project's
+    # progress through this same route does not notify itself.
+    if g.current_role == "MANAGER":
+        company_id = manager_notification_service.resolve_project_building_company_id(
+            updated.get("project_id")
+        )
+        if company_id:
+            manager_notification_service.record(
+                company_id,
+                updated.get("project_id"),
+                "construction",
+                f"Stage updated: {stage_name}",
+                message,
+            )
     return jsonify(updated), 200
 
 

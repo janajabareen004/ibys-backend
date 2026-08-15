@@ -97,6 +97,28 @@ class ManagerNotificationService:
             pass
         return None
 
+    def resolve_project_building_company_id(self, project_id):
+        """Return the owning Building Company's user id for a project, or None.
+
+        Never raises. Does not fabricate a recipient: returns None when the
+        project is unknown or has no assigned building company.
+        """
+        if project_id is None:
+            return None
+        try:
+            res = (
+                supabase.table("projects")
+                .select("building_company_id")
+                .eq("project_id", project_id)
+                .execute()
+            )
+            for row in res.data or []:
+                if row.get("building_company_id"):
+                    return row["building_company_id"]
+        except Exception:
+            pass
+        return None
+
     def record(self, recipient_id, project_id, type, title, message):
         """Insert one manager notification. Best-effort: never raises.
 
