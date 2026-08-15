@@ -3,6 +3,7 @@ from services.request_service import RequestService
 from services.activity_service import ActivityService
 from services.manager_notification_service import ManagerNotificationService
 from services.notification_service import NotificationService
+from services.project_service import ProjectService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -13,6 +14,7 @@ request_service = RequestService()
 activity_service = ActivityService()
 manager_notification_service = ManagerNotificationService()
 notification_service = NotificationService()
+project_service = ProjectService()
 
 
 @requests_bp.route("", methods=["GET"])
@@ -78,7 +80,29 @@ def update_request(request_id):
     The id comes only from the URL. A MANAGER uses this to change the request
     status (e.g. {"status": "approved"}); the service strips protected fields
     (request_id, tenant_id) and persists the rest, returning the updated row.
+
+    A BUILDING_COMPANY caller may only update a request whose tenant lives in
+    a project it owns (resolved server-side via tenant_id -> apartment ->
+    project_id -> project.building_company_id); this is checked here since
+    the request_id alone cannot be trusted. TENANT/MANAGER behavior is
+    unchanged — no ownership check is added for those roles here (TENANT
+    ownership is already enforced inside request_service.update()).
     """
+    if g.current_role == "BUILDING_COMPANY":
+        try:
+            existing_for_ownership = request_service.get_by_id(request_id)
+        except ServiceError as e:
+            return jsonify({"error": e.message}), e.status
+        owner_project_id = activity_service.resolve_request_project_id(
+            existing_for_ownership.get("tenant_id")
+        )
+        try:
+            project = project_service.get_by_id(owner_project_id)
+        except ServiceError as e:
+            return jsonify({"error": e.message}), e.status
+        if str(project.get("building_company_id")) != str(g.current_user_id):
+            return jsonify({"error": "Forbidden: you do not own this request."}), 403
+
     data = request.get_json(silent=True)
     # Capture the previous status BEFORE the update so we only notify the tenant
     # on a real status transition (prevents duplicate notifications on repeated
