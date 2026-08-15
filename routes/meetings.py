@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from services.meeting_service import MeetingService
 from services.activity_service import ActivityService
+from services.project_service import ProjectService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -10,6 +11,7 @@ meetings_bp = Blueprint("meetings", __name__)
 
 meeting_service = MeetingService()
 activity_service = ActivityService()
+project_service = ProjectService()
 
 
 @meetings_bp.route("/api/meetings", methods=["GET"])
@@ -41,9 +43,23 @@ def get_project_meetings(project_id):
 
 @meetings_bp.route("/api/projects/<project_id>/meetings", methods=["POST"])
 @require_auth
-@require_roles("MANAGER")
+@require_roles("MANAGER", "BUILDING_COMPANY")
 def create_meeting(project_id):
-    """Create a meeting under a project. project_id comes only from the URL."""
+    """Create a meeting under a project. project_id comes only from the URL.
+
+    A BUILDING_COMPANY caller may only create a meeting for a project it owns
+    (project.building_company_id must match the authenticated user); this is
+    checked here since the URL project_id alone cannot be trusted. MANAGER
+    behavior is unchanged — no ownership check is performed for that role.
+    """
+    if g.current_role == "BUILDING_COMPANY":
+        try:
+            project = project_service.get_by_id(project_id)
+        except ServiceError as e:
+            return jsonify({"error": e.message}), e.status
+        if str(project.get("building_company_id")) != str(g.current_user_id):
+            return jsonify({"error": "Forbidden: you do not own this project."}), 403
+
     data = request.get_json(silent=True)
     try:
         created = meeting_service.create(project_id, data)
