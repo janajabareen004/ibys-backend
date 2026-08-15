@@ -96,9 +96,24 @@ def create_meeting(project_id):
 
 @meetings_bp.route("/api/meetings/<meeting_id>", methods=["PUT"])
 @require_auth
-@require_roles("MANAGER")
+@require_roles("MANAGER", "BUILDING_COMPANY")
 def update_meeting(meeting_id):
-    """Update a meeting (including approve/reject via status). The id comes only from the URL."""
+    """Update a meeting (including approve/reject via status). The id comes only from the URL.
+
+    A BUILDING_COMPANY caller may only update a meeting belonging to a project
+    it owns (project.building_company_id must match the authenticated user);
+    this is checked here since the meeting_id alone cannot be trusted. MANAGER
+    behavior is unchanged — no ownership check is performed for that role.
+    """
+    if g.current_role == "BUILDING_COMPANY":
+        try:
+            existing = meeting_service.get_by_id(meeting_id)
+            project = project_service.get_by_id(existing.get("project_id"))
+        except ServiceError as e:
+            return jsonify({"error": e.message}), e.status
+        if str(project.get("building_company_id")) != str(g.current_user_id):
+            return jsonify({"error": "Forbidden: you do not own this project."}), 403
+
     data = request.get_json(silent=True)
     try:
         updated = meeting_service.update(meeting_id, data)
