@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, g
 from services.meeting_service import MeetingService
 from services.activity_service import ActivityService
 from services.project_service import ProjectService
+from services.manager_notification_service import ManagerNotificationService
 from services.errors import ServiceError
 from services.auth_guard import require_auth, require_roles
 
@@ -12,6 +13,7 @@ meetings_bp = Blueprint("meetings", __name__)
 meeting_service = MeetingService()
 activity_service = ActivityService()
 project_service = ProjectService()
+manager_notification_service = ManagerNotificationService()
 
 
 @meetings_bp.route("/api/meetings", methods=["GET"])
@@ -68,6 +70,27 @@ def create_meeting(project_id):
     actor = activity_service.resolve_actor(g.current_user_id, g.current_role)
     label = created.get("title") or "a meeting"
     activity_service.record_event(project_id, actor, "meeting_scheduled", f"scheduled {label}")
+
+    # Notify the project's assigned manager when a Building Company schedules a
+    # meeting on their behalf. Best-effort (record() never raises) so a
+    # notification failure can never undo the already-created meeting above.
+    # The recipient is resolved server-side from the project's own
+    # project_manager_id — the caller's request body is never trusted for
+    # notification routing. A MANAGER creating their own meeting does not
+    # notify themselves.
+    if g.current_role == "BUILDING_COMPANY":
+        manager_id = manager_notification_service.resolve_project_manager_id(project_id)
+        if manager_id:
+            purpose = (created.get("purpose") or "").strip()
+            message = (
+                f"A new meeting was scheduled: {purpose}"
+                if purpose
+                else "A new meeting was scheduled for your project."
+            )
+            manager_notification_service.record(
+                manager_id, project_id, "meeting", "New meeting scheduled", message
+            )
+
     return jsonify(created), 201
 
 
